@@ -1,87 +1,121 @@
 using UnityEngine;
+using UnityEngine.SceneManagement; // Cần thiết để reset lại Scene khi xe hỏng
 
 public class PlayerController : MonoBehaviour
 {
     [Header("Cấu hình Tốc độ")]
-    [Tooltip("Tốc độ di chuyển của Player")]
     public float speed = 5f;
 
     [Header("Cấu hình Đường đua (Checkpoints)")]
-    [Tooltip("Mảng chứa tọa độ các góc của đường đua")]
     public Vector3[] checkPoints;
-
-    [Tooltip("Khoảng cách sai số chấp nhận được để tính là đã đến đích")]
     public float arrivalDistance = 0.2f;
-
-    // Chỉ số của điểm checkpoint hiện tại mà xe đang hướng tới
     private int currentTargetIndex = 0;
+
+    [Header("Chỉ số của Xe (Player Stats)")]
+    [Tooltip("Mức độ hư hại (%) - Ban đầu là 0")]
+    public float damaged = 0f;
+    [Tooltip("Lượng xăng hiện tại")]
+    public float fuel = 100f;
+    [Tooltip("Tổng dung tích xăng - Ban đầu là 100")]
+    public float capacity = 100f;
+    [Tooltip("Số vòng đua đã hoàn thành")]
+    public int laps = 0;
+
+    private Vector3 startPosition; // Lưu vị trí xuất phát ban đầu
 
     void Start()
     {
-        // Kiểm tra xem người dùng đã thiết lập các điểm checkpoint trong Inspector chưa
+        // 1. Đặt lượng xăng ban đầu bằng dung tích tối đa
+        fuel = capacity;
+
+        // 2. Lưu lại vị trí xuất phát ban đầu khi vừa Start Scene
+        startPosition = transform.position;
+
         if (checkPoints == null || checkPoints.Length == 0)
         {
-            Debug.LogWarning("Vui lòng thiết lập các điểm Checkpoints trong bảng Inspector!");
+            Debug.LogWarning("Vui lòng thiết lập các điểm Checkpoints!");
         }
     }
 
     void Update()
     {
-        // Nếu không có điểm checkpoint nào, không thực hiện di chuyển
         if (checkPoints.Length == 0) return;
 
-        MoveTowardsTarget();
+        // Xe chỉ di chuyển được nếu chưa bị hỏng hoàn toàn và còn xăng
+        if (damaged < 100f && fuel > 0)
+        {
+            MoveTowardsTarget();
+            
+            // Giảm xăng theo thời gian (Tùy chọn để logic thực tế hơn)
+            fuel -= Time.deltaTime * 0.5f; 
+        }
     }
 
-    /// <summary>
-    /// Hàm xử lý di chuyển Player hướng về phía Checkpoint mục tiêu
-    /// </summary>
     private void MoveTowardsTarget()
     {
-        // Lấy vị trí đích đến hiện tại từ mảng
         Vector3 targetPosition = checkPoints[currentTargetIndex];
-
-        // 1. Tính hướng di chuyển từ vị trí hiện tại đến đích
         Vector3 direction = (targetPosition - transform.position).normalized;
 
-        // 2. Di chuyển Player theo hướng đã tính dựa trên speed và deltaTime
         transform.position += direction * speed * Time.deltaTime;
 
-        // 3. (Tùy chọn) Xoay Player nhìn về phía mục tiêu cho mượt mà
         if (direction != Vector3.zero)
         {
             Quaternion targetRotation = Quaternion.LookRotation(direction);
             transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, Time.deltaTime * 10f);
         }
 
-        // 4. Kiểm tra xem Player đã đến đích chưa bằng cách tính hiệu số 2 vector (.magnitude)
+        // Kiểm tra đến đích Checkpoint bằng .magnitude
         float distance = (targetPosition - transform.position).magnitude;
-
         if (distance < arrivalDistance)
         {
-            // Chuyển sang điểm checkpoint tiếp theo
             currentTargetIndex++;
-
-            // Tránh tràn mảng: Nếu vượt quá điểm cuối cùng thì quay về điểm 0
             if (currentTargetIndex >= checkPoints.Length)
             {
                 currentTargetIndex = 0;
             }
-
-            Debug.Log($"Đã đến checkpoint! Đích tiếp theo: checkPoints[{currentTargetIndex}]");
         }
     }
 
-    // Vẽ các đường nối checkpoint trong Editor để dễ quan sát hệ thống đường đua
+    // Xử lý va chạm (Sử dụng Trigger để xe không bị nảy hoặc lệch hướng bay ra ngoài)
+    private void OnTriggerEnter(Collider other)
+    {
+        Debug.Log($"[XUẤT HIỆN VA CHẠM] Xe đã chạm vào một Object tên là: {other.gameObject.name} | Tag của nó là: {other.tag}");
+        // 1. Nếu va chạm với Vật cản (Obstacle) hoặc Tường biên (Wall)
+        if (other.CompareTag("Obstacle") || other.CompareTag("Wall"))
+        {
+            damaged += 5f; // Tăng mức độ hư hại lên 5%
+            Debug.Log($"Xe bị va chạm! Độ hư hại hiện tại: {damaged}%");
+
+            // Nếu hư hại đạt hoặc vượt quá 100%, reset lại Scene
+            if (damaged >= 100f)
+            {
+                Debug.LogError("Xe đã bị hỏng hoàn toàn! Đang khởi động lại màn chơi...");
+                ResetScene();
+            }
+        }
+
+        // 2. Nếu đi qua vạch xuất phát/đích (FinishLine)
+        if (other.CompareTag("FinishLine"))
+        {
+            laps++; // Tăng số vòng đua lên 1
+            Debug.Log($"Chúc mừng! Bạn đã hoàn thành vòng thứ: {laps}");
+        }
+    }
+
+    private void ResetScene()
+    {
+        // Lấy tên của Scene hiện tại và load lại nó
+        string currentSceneName = SceneManager.GetActiveScene().name;
+        SceneManager.LoadScene(currentSceneName);
+    }
+
     private void OnDrawGizmos()
     {
         if (checkPoints == null || checkPoints.Length == 0) return;
-
         Gizmos.color = Color.green;
         for (int i = 0; i < checkPoints.Length; i++)
         {
             Gizmos.DrawSphere(checkPoints[i], 0.3f);
-            
             int nextIndex = (i + 1) % checkPoints.Length;
             Gizmos.DrawLine(checkPoints[i], checkPoints[nextIndex]);
         }
